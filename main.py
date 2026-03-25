@@ -16,7 +16,7 @@ from models import (
     ConflictResolution,
 )
 from services import OllamaClient, RagService
-from vectorstore import VectorRetriever
+from vectorstore.retriever import VectorRetriever
 
 # Configure logging
 logging.basicConfig(

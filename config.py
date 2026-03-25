@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # Ollama Configuration
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3.5"
+    ollama_model: str = "qwen3-vl:235b-cloud"
 
     # RAG Configuration
     chroma_persist_dir: str = "./chroma_db"
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Server Configuration
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8080
 
     # Git History Indexing
     git_history_depth: int = 500

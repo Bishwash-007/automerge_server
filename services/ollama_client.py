@@ -129,7 +129,7 @@ class OllamaClient:
 
             model_names = []
             if hasattr(models, "models"):
-                model_names = [m.name for m in models.models]
+                model_names = [m.model for m in models.models]
 
             model_available = self.model in model_names
 
@@ -150,7 +150,7 @@ class OllamaClient:
         """Check if the configured model is available."""
         try:
             models = self._client.list()
-            model_names = [m.name for m in models.models] if hasattr(models, "models") else []
+            model_names = [m.model for m in models.models] if hasattr(models, "models") else []
             return self.model in model_names
         except Exception:
             return False
