@@ -1,11 +1,11 @@
 # Automerge Server
 
-Python API server with RAG for AI-powered merge conflict resolution using Ollama and Qwen 3.5.
+Python API server with RAG for AI-powered merge conflict resolution using Ollama and Qwen 3.x (default: qwen3-vl:235b-cloud).
 
 ## Prerequisites
 
 1. **Ollama** installed and running
-2. **Qwen 3.5** model pulled: `ollama pull qwen3.5`
+2. **Qwen 3.x** model pulled: `ollama pull qwen3-vl:235b-cloud`
 3. **Python 3.10+**
 
 ## Setup
@@ -20,8 +20,21 @@ cp .env.example .env
 # Start Ollama (if not running)
 ollama serve
 
-# Start the server
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Start the server (default port 8080)
+uvicorn main:app --reload --host 0.0.0.0 --port 8080
+## Configuration
+
+Default settings (see `config.py`):
+
+- **Ollama Base URL:** `http://localhost:11434`
+- **Ollama Model:** `qwen3-vl:235b-cloud`
+- **ChromaDB Directory:** `./chroma_db`
+- **Embedding Model:** `all-MiniLM-L6-v2`
+- **Host:** `0.0.0.0`
+- **Port:** `8080`
+- **Git History Depth:** `500`
+
+You can override these by editing `.env`.
 ```
 
 ## API Endpoints
