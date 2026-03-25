@@ -10,7 +10,7 @@ Python API server with RAG for AI-powered merge conflict resolution using Ollama
 
 ## Setup
 
-```bash
+```zsh
 # Install dependencies
 pip install -r requirements.txt
 
@@ -23,6 +23,7 @@ ollama serve
 # Start the server (default port 8080)
 uvicorn main:app --reload --host 0.0.0.0 --port 8080
 ## Configuration
+```
 
 Default settings (see `config.py`):
 
@@ -35,9 +36,10 @@ Default settings (see `config.py`):
 - **Git History Depth:** `500`
 
 You can override these by editing `.env`.
-```
 
 ## API Endpoints
+
+Refer to [curl.md](curl.md) for detailed API Documentation
 
 - `GET /predictor/health/` - Health check
 - `POST /predictor/resolve/` - Resolve single conflict
@@ -47,7 +49,7 @@ You can override these by editing `.env`.
 
 Build the vector index from git history and codebase:
 
-```bash
+``` zsh
 python scripts/build_index.py
 ```
 
