@@ -1,6 +1,7 @@
 """Request models for the automerge API."""
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class ConflictRequest(BaseModel):
@@ -22,6 +23,10 @@ class ConflictRequest(BaseModel):
         default=None,
         description="Optional file path for RAG context",
         examples=["src/index.ts"],
+    )
+    provider: Literal["ollama", "huggingface"] = Field(
+        default="ollama",
+        description="LLM provider to use for resolution",
     )
 
 

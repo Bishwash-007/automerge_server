@@ -2,10 +2,13 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
-from config import get_settings
+from config.ollama_config import get_settings
+from config.hf_config import get_settings as get_hf_settings
 from services.conflict_parser import ConflictParser
 from services.ollama_client import OllamaClient
+from services.hf_client import HFClient
 from prompts.merge_resolution import (
     SYSTEM_PROMPT,
     RESOLUTION_PROMPT,
@@ -23,6 +26,7 @@ class ResolutionResult:
     resolved_code: str
     summary: str
     confidence: float
+    provider: str = "ollama"
     retrieved_context: list[dict] | None = None
 
 
@@ -32,17 +36,27 @@ class RagService:
     def __init__(
         self,
         ollama_client: OllamaClient | None = None,
+        hf_client: HFClient | None = None,
         retriever: VectorRetriever | None = None,
+        default_provider: Literal["ollama", "huggingface"] = "ollama",
     ):
         """
         Initialize the RAG service.
 
         Args:
             ollama_client: Ollama client for generation
+            hf_client: HuggingFace client for generation
             retriever: Vector retriever for context
+            default_provider: Default LLM provider to use
         """
         self.ollama = ollama_client or OllamaClient()
+        self.hf = hf_client or HFClient()
         self.retriever = retriever or VectorRetriever()
+        self.default_provider = default_provider
+
+    def _get_client(self, provider: Literal["ollama", "huggingface"]) -> OllamaClient | HFClient:
+        """Get the appropriate client based on provider."""
+        return self.ollama if provider == "ollama" else self.hf
 
     async def resolve_conflict(
         self,
@@ -50,6 +64,7 @@ class RagService:
         language: str,
         file_path: str | None = None,
         n_context_results: int = 5,
+        provider: Literal["ollama", "huggingface"] | None = None,
     ) -> ResolutionResult:
         """
         Resolve a merge conflict using RAG.
@@ -59,14 +74,17 @@ class RagService:
             language: Programming language
             file_path: Optional file path for context
             n_context_results: Number of context documents to retrieve
+            provider: LLM provider to use (uses default if not specified)
 
         Returns:
             ResolutionResult with resolved code and summary
         """
+        provider = provider or self.default_provider
+
         # Parse the conflict
         parsed = ConflictParser.parse(conflict_text)
+        base_content = None
         if not parsed:
-            # Try to extract sections directly
             head_label, head_content, incoming_label, incoming_content = (
                 ConflictParser.extract_sections(conflict_text)
             )
@@ -76,8 +94,20 @@ class RagService:
             head_content = section.head_content
             incoming_label = section.incoming_label
             incoming_content = section.incoming_content
+            base_content = section.base_content
 
-        # Retrieve relevant context
+        # For HuggingFace, use the specialized resolve_conflict method
+        if provider == "huggingface":
+            base = base_content if base_content else head_content
+            return await self._resolve_with_hf(
+                base=base,
+                ours=head_content,
+                theirs=incoming_content,
+                language=language,
+                provider=provider,
+            )
+
+        # Retrieve relevant context for Ollama
         context_docs = self.retriever.retrieve_for_conflict(
             head_content=head_content,
             incoming_content=incoming_content,
@@ -99,7 +129,7 @@ class RagService:
             context=context_str,
         )
 
-        # Generate resolution
+        # Generate resolution using Ollama
         try:
             response = await self.ollama.chat(
                 system_prompt=SYSTEM_PROMPT,
@@ -108,11 +138,11 @@ class RagService:
             )
         except Exception as e:
             logger.error(f"Generation failed: {e}")
-            # Fallback: return HEAD content with low confidence
             return ResolutionResult(
                 resolved_code=head_content,
                 summary=f"Could not generate resolution: {e}. Showing HEAD content as fallback.",
                 confidence=0.1,
+                provider=provider,
                 retrieved_context=context_docs,
             )
 
@@ -126,8 +156,40 @@ class RagService:
             resolved_code=resolved_code,
             summary=summary,
             confidence=confidence,
+            provider=provider,
             retrieved_context=context_docs,
         )
+
+    async def _resolve_with_hf(
+        self,
+        base: str,
+        ours: str,
+        theirs: str,
+        language: str,
+        provider: str,
+    ) -> ResolutionResult:
+        """Resolve conflict using HuggingFace CodeT5 model."""
+        try:
+            resolved_code = self.hf.resolve_conflict(
+                base=base,
+                ours=ours,
+                theirs=theirs,
+                language=language,
+            )
+            return ResolutionResult(
+                resolved_code=resolved_code,
+                summary="Resolved using HuggingFace CodeT5 model.",
+                confidence=0.75,  # HF model doesn't provide confidence
+                provider=provider,
+            )
+        except Exception as e:
+            logger.error(f"HF resolution failed: {e}")
+            return ResolutionResult(
+                resolved_code=ours,
+                summary=f"Could not generate resolution: {e}. Showing HEAD content as fallback.",
+                confidence=0.1,
+                provider=provider,
+            )
 
     def resolve_conflict_sync(
         self,
@@ -135,6 +197,7 @@ class RagService:
         language: str,
         file_path: str | None = None,
         n_context_results: int = 5,
+        provider: Literal["ollama", "huggingface"] | None = None,
     ) -> ResolutionResult:
         """
         Synchronous version of resolve_conflict.
@@ -144,12 +207,16 @@ class RagService:
             language: Programming language
             file_path: Optional file path for context
             n_context_results: Number of context documents to retrieve
+            provider: LLM provider to use
 
         Returns:
             ResolutionResult with resolved code and summary
         """
+        provider = provider or self.default_provider
+
         # Parse the conflict
         parsed = ConflictParser.parse(conflict_text)
+        base_content = None
         if not parsed:
             head_label, head_content, incoming_label, incoming_content = (
                 ConflictParser.extract_sections(conflict_text)
@@ -160,6 +227,18 @@ class RagService:
             head_content = section.head_content
             incoming_label = section.incoming_label
             incoming_content = section.incoming_content
+            base_content = section.base_content
+
+        # For HuggingFace, use the specialized resolve_conflict method
+        if provider == "huggingface":
+            base = base_content if base_content else head_content
+            return self._resolve_with_hf_sync(
+                base=base,
+                ours=head_content,
+                theirs=incoming_content,
+                language=language,
+                provider=provider,
+            )
 
         # Retrieve relevant context
         context_docs = self.retriever.retrieve_for_conflict(
@@ -196,6 +275,7 @@ class RagService:
                 resolved_code=head_content,
                 summary=f"Could not generate resolution: {e}. Showing HEAD content as fallback.",
                 confidence=0.1,
+                provider=provider,
                 retrieved_context=context_docs,
             )
 
@@ -207,8 +287,40 @@ class RagService:
             resolved_code=resolved_code,
             summary=summary,
             confidence=confidence,
+            provider=provider,
             retrieved_context=context_docs,
         )
+
+    def _resolve_with_hf_sync(
+        self,
+        base: str,
+        ours: str,
+        theirs: str,
+        language: str,
+        provider: str,
+    ) -> ResolutionResult:
+        """Synchronous resolve using HuggingFace CodeT5 model."""
+        try:
+            resolved_code = self.hf.resolve_conflict(
+                base=base,
+                ours=ours,
+                theirs=theirs,
+                language=language,
+            )
+            return ResolutionResult(
+                resolved_code=resolved_code,
+                summary="Resolved using HuggingFace CodeT5 model.",
+                confidence=0.75,
+                provider=provider,
+            )
+        except Exception as e:
+            logger.error(f"HF resolution failed: {e}")
+            return ResolutionResult(
+                resolved_code=ours,
+                summary=f"Could not generate resolution: {e}. Showing HEAD content as fallback.",
+                confidence=0.1,
+                provider=provider,
+            )
 
     def _format_context(self, context_docs: list[dict]) -> str:
         """Format retrieved context documents for the prompt."""
@@ -264,14 +376,12 @@ class RagService:
             summary_parts = response.split("Explanation:", 1)
             summary = summary_parts[1].strip()
         else:
-            # If no clear summary, use the last part of response
             summary = response.split("\n")[-3:]
             summary = "\n".join(summary) if summary else "Resolution generated."
 
         # Clean up resolved code
         resolved_code = resolved_code.strip()
         if not resolved_code:
-            # Fallback: use entire response as code
             resolved_code = response.split("SUMMARY:")[0].strip()
             resolved_code = resolved_code.split("Explanation:")[0].strip()
 
@@ -284,19 +394,13 @@ class RagService:
     ) -> float:
         """
         Estimate confidence score based on context relevance.
-
-        This is a simple heuristic - can be improved with more signals.
         """
         if not context_docs:
-            return 0.5  # Base confidence without context
+            return 0.5
 
-        # Higher confidence with more relevant context
         avg_relevance = sum(d.get("relevance_score", 0) for d in context_docs) / len(
             context_docs
         )
 
-        # Boost confidence if we have good context
         base_confidence = 0.6 + (avg_relevance * 0.3)
-
-        # Cap at 0.95 (never 100% confident)
         return min(0.95, max(0.1, base_confidence))

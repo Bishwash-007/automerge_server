@@ -6,7 +6,7 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from config import get_settings
+from config.ollama_config import get_settings
 
 logger = logging.getLogger(__name__)
 

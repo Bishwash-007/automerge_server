@@ -7,7 +7,7 @@ from typing import Any
 import ollama
 from ollama import ChatResponse
 
-from config import get_settings
+from config.ollama_config import get_settings
 
 logger = logging.getLogger(__name__)
 
