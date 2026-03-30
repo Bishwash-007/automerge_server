@@ -83,7 +83,7 @@ async def health_check() -> HealthResponse:
         ollama_available=ollama_status.get("ollama_available", False),
         model_loaded=ollama_status.get("model_loaded"),
         huggingface_available=True,  # HF model is always available when server is up
-        provider="ollama",  # Default provider
+        provider="huggingface",  # Default provider
     )
 
 

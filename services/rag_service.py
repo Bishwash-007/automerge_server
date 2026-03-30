@@ -168,7 +168,7 @@ class RagService:
         language: str,
         provider: str,
     ) -> ResolutionResult:
-        """Resolve conflict using HuggingFace CodeT5 model."""
+        """Resolve conflict using HuggingFace CodeT5 model, then generate summary with Ollama."""
         try:
             resolved_code = self.hf.resolve_conflict(
                 base=base,
@@ -176,10 +176,19 @@ class RagService:
                 theirs=theirs,
                 language=language,
             )
+
+            # Generate a detailed summary using Ollama
+            summary = await self._generate_summary(
+                head_content=ours,
+                incoming_content=theirs,
+                resolved_code=resolved_code,
+                language=language,
+            )
+
             return ResolutionResult(
                 resolved_code=resolved_code,
-                summary="Resolved using HuggingFace CodeT5 model.",
-                confidence=0.75,  # HF model doesn't provide confidence
+                summary=summary,
+                confidence=0.75,
                 provider=provider,
             )
         except Exception as e:
@@ -190,6 +199,41 @@ class RagService:
                 confidence=0.1,
                 provider=provider,
             )
+
+    async def _generate_summary(
+        self,
+        head_content: str,
+        incoming_content: str,
+        resolved_code: str,
+        language: str,
+    ) -> str:
+        """Generate a detailed summary for an HF resolution using Ollama."""
+        try:
+            user_prompt = SUMMARY_PROMPT.format(
+                head_summary=self._summarize_code(head_content, language),
+                incoming_summary=self._summarize_code(incoming_content, language),
+                resolved_code=resolved_code,
+            )
+            response = await self.ollama.chat(
+                system_prompt="You are an expert software engineer explaining merge conflict resolutions.",
+                user_prompt=user_prompt,
+                temperature=0.3,
+            )
+            return response.strip()
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            return "Resolved using HuggingFace CodeT5 model. Summary unavailable."
+
+    def _summarize_code(self, code: str, language: str) -> str:
+        """Create a brief summary of code changes."""
+        if not code.strip():
+            return "empty"
+        lines = code.strip().split('\n')
+        if len(lines) <= 2:
+            return code.strip()
+        first = lines[0].strip()
+        last = lines[-1].strip()
+        return f"{first} ... {last} ({len(lines)} lines)"
 
     def resolve_conflict_sync(
         self,
@@ -299,7 +343,7 @@ class RagService:
         language: str,
         provider: str,
     ) -> ResolutionResult:
-        """Synchronous resolve using HuggingFace CodeT5 model."""
+        """Synchronous resolve using HuggingFace CodeT5 model, then generate summary with Ollama."""
         try:
             resolved_code = self.hf.resolve_conflict(
                 base=base,
@@ -307,9 +351,18 @@ class RagService:
                 theirs=theirs,
                 language=language,
             )
+
+            # Generate a detailed summary using Ollama
+            summary = self._generate_summary_sync(
+                head_content=ours,
+                incoming_content=theirs,
+                resolved_code=resolved_code,
+                language=language,
+            )
+
             return ResolutionResult(
                 resolved_code=resolved_code,
-                summary="Resolved using HuggingFace CodeT5 model.",
+                summary=summary,
                 confidence=0.75,
                 provider=provider,
             )
@@ -321,6 +374,30 @@ class RagService:
                 confidence=0.1,
                 provider=provider,
             )
+
+    def _generate_summary_sync(
+        self,
+        head_content: str,
+        incoming_content: str,
+        resolved_code: str,
+        language: str,
+    ) -> str:
+        """Generate a detailed summary for an HF resolution using Ollama (sync version)."""
+        try:
+            user_prompt = SUMMARY_PROMPT.format(
+                head_summary=self._summarize_code(head_content, language),
+                incoming_summary=self._summarize_code(incoming_content, language),
+                resolved_code=resolved_code,
+            )
+            response = self.ollama.chat_sync(
+                system_prompt="You are an expert software engineer explaining merge conflict resolutions.",
+                user_prompt=user_prompt,
+                temperature=0.3,
+            )
+            return response.strip()
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            return "Resolved using HuggingFace CodeT5 model. Summary unavailable."
 
     def _format_context(self, context_docs: list[dict]) -> str:
         """Format retrieved context documents for the prompt."""
