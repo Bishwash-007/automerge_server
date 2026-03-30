@@ -10,7 +10,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 import yaml
 
-from config import get_settings
+from config.ollama_config import get_settings
 
 logger = logging.getLogger(__name__)
 

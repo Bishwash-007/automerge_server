@@ -10,6 +10,7 @@ class ConflictSection:
 
     head_content: str
     incoming_content: str
+    base_content: str | None = None
     head_label: str = "HEAD"
     incoming_label: str = "incoming"
 
@@ -26,13 +27,27 @@ class ParsedConflict:
 class ConflictParser:
     """Parser for git merge conflict markers."""
 
-    # Pattern to match conflict markers
+    # Pattern to match conflict markers (two-way: HEAD vs incoming)
     CONFLICT_PATTERN = re.compile(
         r"<<<<<<<\s*(\w+)?\s*\n"  # Start with HEAD label
         r"([\s\S]*?)"  # HEAD content
         r"\n=======\n"  # Separator
         r"([\s\S]*?)"  # Incoming content
         r"\n>>>>>>>[ ]*(\w+)?",  # End with incoming label
+        re.MULTILINE,
+    )
+
+    # Pattern for three-way conflicts with base section
+    THREE_WAY_PATTERN = re.compile(
+        r"<<<<<<<\s*(\w+)?\s*\n"
+        r"([\s\S]*?)"
+        r"\n=======\n"
+        r"([\s\S]*?)"
+        r"\n\|\|\|\|\|\|\|\s*(\w+)?\s*\n"
+        r"([\s\S]*?)"
+        r"\n=======\n"
+        r"([\s\S]*?)"
+        r"\n>>>>>>>[ ]*(\w+)?",
         re.MULTILINE,
     )
 
@@ -48,20 +63,24 @@ class ConflictParser:
             List of ParsedConflict objects
         """
         conflicts = []
-        matches = list(cls.CONFLICT_PATTERN.finditer(conflict_text))
 
-        if not matches:
-            return conflicts
+        # First try three-way conflict pattern
+        three_way_matches = list(cls.THREE_WAY_PATTERN.finditer(conflict_text))
 
-        for match in matches:
+        for match in three_way_matches:
             head_label = match.group(1) or "HEAD"
             head_content = match.group(2).strip()
             incoming_content = match.group(3).strip()
-            incoming_label = match.group(4) or "incoming"
+            base_label = match.group(4) or "base"
+            base_content = match.group(5).strip()
+            incoming_content_merged = match.group(6).strip()
+            incoming_label = match.group(7) or "incoming"
 
+            # Use the incoming_content from the second section (after base)
             section = ConflictSection(
                 head_content=head_content,
-                incoming_content=incoming_content,
+                incoming_content=incoming_content_merged,
+                base_content=base_content,
                 head_label=head_label,
                 incoming_label=incoming_label,
             )
@@ -69,9 +88,34 @@ class ConflictParser:
             parsed = ParsedConflict(
                 original_text=match.group(0),
                 sections=[section],
-                has_multiple_conflicts=len(matches) > 1,
+                has_multiple_conflicts=len(three_way_matches) > 1,
             )
             conflicts.append(parsed)
+
+        # Fall back to two-way conflict pattern (if no three-way found)
+        if not three_way_matches:
+            two_way_matches = list(cls.CONFLICT_PATTERN.finditer(conflict_text))
+
+            for match in two_way_matches:
+                head_label = match.group(1) or "HEAD"
+                head_content = match.group(2).strip()
+                incoming_content = match.group(3).strip()
+                incoming_label = match.group(4) or "incoming"
+
+                section = ConflictSection(
+                    head_content=head_content,
+                    incoming_content=incoming_content,
+                    base_content=None,
+                    head_label=head_label,
+                    incoming_label=incoming_label,
+                )
+
+                parsed = ParsedConflict(
+                    original_text=match.group(0),
+                    sections=[section],
+                    has_multiple_conflicts=len(two_way_matches) > 1,
+                )
+                conflicts.append(parsed)
 
         return conflicts
 

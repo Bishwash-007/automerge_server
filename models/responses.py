@@ -26,6 +26,8 @@ class HealthResponse(BaseModel):
     status: str = Field(..., examples=["healthy", "unhealthy"])
     ollama_available: bool = Field(default=False)
     model_loaded: str | None = Field(default=None)
+    huggingface_available: bool = Field(default=False)
+    provider: str = Field(default="ollama")
 
 
 class ResolveResponse(BaseModel):

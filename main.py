@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import get_settings
+from config.ollama_config import get_settings
+from config.hf_config import get_settings as get_hf_settings
 from models import (
     ConflictRequest,
     BatchConflictRequest,
@@ -15,7 +16,7 @@ from models import (
     BatchResolveResponse,
     ConflictResolution,
 )
-from services import OllamaClient, RagService
+from services import OllamaClient, HFClient, RagService
 from vectorstore.retriever import VectorRetriever
 
 # Configure logging
@@ -32,7 +33,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Automerge Server...")
     settings = get_settings()
-    logger.info(f"Using model: {settings.ollama_model}")
+    hf_settings = get_hf_settings()
+    logger.info(f"Ollama model: {settings.ollama_model}")
+    logger.info(f"HuggingFace model: {hf_settings.hf_model}")
     logger.info(f"ChromaDB persist dir: {settings.chroma_persist_dir}")
     yield
     # Shutdown
@@ -59,8 +62,13 @@ app.add_middleware(
 # Initialize services
 settings = get_settings()
 ollama_client = OllamaClient()
+hf_client = HFClient()
 retriever = VectorRetriever()
-rag_service = RagService(ollama_client=ollama_client, retriever=retriever)
+rag_service = RagService(
+    ollama_client=ollama_client,
+    hf_client=hf_client,
+    retriever=retriever,
+)
 
 
 @app.get("/predictor/health/", response_model=HealthResponse)
@@ -74,6 +82,8 @@ async def health_check() -> HealthResponse:
         status=status,
         ollama_available=ollama_status.get("ollama_available", False),
         model_loaded=ollama_status.get("model_loaded"),
+        huggingface_available=True,  # HF model is always available when server is up
+        provider="huggingface",  # Default provider
     )
 
 
@@ -83,7 +93,7 @@ async def resolve_conflict(request: ConflictRequest) -> ResolveResponse:
     Resolve a single merge conflict.
 
     Args:
-        request: ConflictRequest with conflict_text, language, and optional file_path
+        request: ConflictRequest with conflict_text, language, provider, and optional file_path
 
     Returns:
         ResolveResponse with resolved code and summary
@@ -93,6 +103,7 @@ async def resolve_conflict(request: ConflictRequest) -> ResolveResponse:
             conflict_text=request.conflict_text,
             language=request.language,
             file_path=request.file_path,
+            provider=request.provider,
         )
 
         return ResolveResponse(
@@ -103,9 +114,8 @@ async def resolve_conflict(request: ConflictRequest) -> ResolveResponse:
 
     except Exception as e:
         logger.error(f"Conflict resolution failed: {e}")
-        # Return fallback response
         return ResolveResponse(
-            result=request.conflict_text,  # Return original on failure
+            result=request.conflict_text,
             summary=f"Resolution failed: {str(e)}",
             confidence=0.0,
         )
@@ -130,6 +140,7 @@ async def resolve_batch(request: BatchConflictRequest) -> BatchResolveResponse:
                 conflict_text=conflict.conflict_text,
                 language=conflict.language,
                 file_path=conflict.file_path,
+                provider=conflict.provider,
             )
 
             results.append(
@@ -142,7 +153,6 @@ async def resolve_batch(request: BatchConflictRequest) -> BatchResolveResponse:
 
         except Exception as e:
             logger.error(f"Batch resolution failed for conflict: {e}")
-            # Add fallback result for this conflict
             results.append(
                 ConflictResolution(
                     result=conflict.conflict_text,
@@ -165,6 +175,10 @@ async def root():
             "health": "/predictor/health/",
             "resolve": "/predictor/resolve/",
             "batch_resolve": "/predictor/resolve/batch/",
+        },
+        "providers": {
+            "ollama": "Default - Uses Ollama with RAG for context-aware resolution",
+            "huggingface": "Uses CodeT5 model for direct three-way merge resolution",
         },
     }
 
